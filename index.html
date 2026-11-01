@@ -83,6 +83,14 @@ function speak(text,lang){
   if(v)u.voice=v;speechSynthesis.speak(u);
 }
 
+const IOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==="MacIntel"&&navigator.maxTouchPoints>1);
+let usedLang=null;
+// iOS 的語音辨識在一次頁面載入中只認第一個用過的語言：換語言時保存對話、重載頁面再接著聽
+function ss(k,v){try{return v===undefined?sessionStorage.getItem(k):(v===null?sessionStorage.removeItem(k):sessionStorage.setItem(k,v))}catch(e){return null}}
+function saveAndReload(id){
+  ss("duet",JSON.stringify({langA:sides.A.lang(),langB:sides.B.lang(),logA:sides.A.log.innerHTML,logB:sides.B.log.innerHTML,tts:document.getElementById("tts").checked,pending:id}));
+  hint.textContent="切換語言中…";location.reload();
+}
 let REC=null,spokeOnce=false,rec=null,active=null,finalText="",lastErr="",gen=0;
 const hint=document.getElementById("hint");
 function status(id,msg){sides[id].live.textContent=msg;hint.textContent=msg}
@@ -93,6 +101,7 @@ async function wakeMic(){
 }
 async function start(id,retry){
   if(!SR){hint.textContent="這個瀏覽器不支援語音辨識，請用 Safari 或 Chrome 開啟。";return}
+  if(IOS&&usedLang&&usedLang!==sides[id].lang()){saveAndReload(id);return}
   if(rec){gen++;try{rec.abort()}catch(e){}reset(active);await new Promise(r=>setTimeout(r,250))}
   const spoke=speechSynthesis.speaking||spokeOnce;
   speechSynthesis.cancel();
@@ -103,14 +112,15 @@ async function start(id,retry){
   // iOS: 同一頁重複 new SpeechRecognition 第二次起常收不到音，整頁共用一個
   const r=REC||(REC=new SR());rec=r;
   r.lang=sides[id].lang();r.interimResults=true;r.continuous=true;
-  r.onstart=()=>{if(my===gen)status(id,"聆聽中（"+r.lang+"）…")};
+  r.onstart=()=>{usedLang=r.lang;if(my===gen)status(id,"聆聽中（"+r.lang+"）…")};
   r.onresult=e=>{if(my!==gen)return;let interim="";finalText="";
     for(const x of e.results){x.isFinal?finalText+=x[0].transcript:interim+=x[0].transcript}
     sides[id].live.textContent=finalText+interim;};
   r.onerror=e=>{if(my===gen)lastErr=e.error};
   r.onend=()=>{if(my!==gen)return;
+    if(lastErr&&!finalText&&retry==="auto"){reset(id);status(id,"");hint.textContent="已切換，請點一下按鈕開始說話";sides[id].btn.textContent="點我說話";return}
     // iOS 偶爾一開始就 aborted：沒收到內容時自動重試一次
-    if(lastErr==="aborted"&&!finalText&&!retry){rec=null;setTimeout(()=>start(id,true),400);return}
+    if(lastErr==="aborted"&&!finalText&&retry!==true){rec=null;setTimeout(()=>start(id,true),400);return}
     finish(id)};
   sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…點一下送出";
   try{r.start()}catch(e){lastErr=e.message||String(e);finish(id)}
@@ -133,6 +143,14 @@ for(const id of ["A","B"]){
   b.addEventListener("contextmenu",e=>e.preventDefault());
 }
 speechSynthesis.getVoices();
+(()=>{const raw=ss("duet");if(!raw)return;ss("duet",null);
+  try{const st=JSON.parse(raw);
+    document.getElementById("langA").value=st.langA;document.getElementById("langB").value=st.langB;
+    sides.A.log.innerHTML=st.logA;sides.B.log.innerHTML=st.logB;document.getElementById("tts").checked=st.tts;
+    sides.A.log.scrollTop=sides.B.log.scrollTop=1e9;
+    if(st.pending)start(st.pending,"auto");
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
