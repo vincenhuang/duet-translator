@@ -37,6 +37,7 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 </head>
 <body>
 <section class="side top" id="B" style="--c:var(--b)"></section>
+<label class="hint"><input type="checkbox" id="tts" checked> 朗讀翻譯</label>
 <div class="hint" id="hint">點一下按鈕開始說話，說完再點一下送出翻譯</div>
 <section class="side" id="A" style="--c:var(--a)"></section>
 
@@ -75,21 +76,30 @@ async function translate(text,from,to){
 }
 
 function speak(text,lang){
+  if(!document.getElementById("tts").checked)return;spokeOnce=true;
   speechSynthesis.cancel();
   const u=new SpeechSynthesisUtterance(text);u.lang=lang;
   const v=speechSynthesis.getVoices().find(v=>v.lang.replace("_","-").startsWith(lang.split("-")[0]));
   if(v)u.voice=v;speechSynthesis.speak(u);
 }
 
-let rec=null,active=null,finalText="",lastErr="",gen=0;
+let spokeOnce=false,rec=null,active=null,finalText="",lastErr="",gen=0;
 const hint=document.getElementById("hint");
 function status(id,msg){sides[id].live.textContent=msg;hint.textContent=msg}
 function reset(id){rec=null;active=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話"}
-function start(id){
+async function wakeMic(){
+  // iOS: 朗讀後音訊停在播放模式，先取一次麥克風把它切回錄音模式
+  try{const st=await navigator.mediaDevices.getUserMedia({audio:true});st.getTracks().forEach(t=>t.stop())}catch(e){}
+}
+async function start(id){
   if(!SR){hint.textContent="這個瀏覽器不支援語音辨識，請用 Safari 或 Chrome 開啟。";return}
   if(rec){try{rec.abort()}catch(e){}reset(active)}
+  const spoke=speechSynthesis.speaking||spokeOnce;
   speechSynthesis.cancel();
-  const my=++gen;active=id;finalText="";lastErr="";
+  const my=++gen;
+  sides[id].btn.classList.add("on");sides[id].btn.textContent="準備中…";
+  if(spoke){await wakeMic();await new Promise(r=>setTimeout(r,300));spokeOnce=false}
+  if(my!==gen)return;active=id;finalText="";lastErr="";
   const r=new SR();rec=r;
   r.lang=sides[id].lang();r.interimResults=true;r.continuous=true;
   r.onstart=()=>{if(my===gen)status(id,"聆聽中（"+r.lang+"）…")};
