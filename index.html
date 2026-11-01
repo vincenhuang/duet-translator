@@ -14,6 +14,8 @@
 @media (prefers-color-scheme:dark){:root{--bg:#0f1418;--panel:#182028;--fg:#e8edf2;--muted:#8d99a6;--a:#5a9bff;--b:#f08a4b;--line:#2a3540;color-scheme:dark}}
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.msg{-webkit-user-select:text;user-select:text}
 body{background:var(--bg);color:var(--fg);font-family:var(--display);display:flex;flex-direction:column;gap:8px;padding:8px 16px}
 .side{flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;padding:12px;gap:10px}
 .side.top{transform:rotate(180deg)}
@@ -24,7 +26,7 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 .msg small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
 .mine{align-self:flex-end;background:var(--bg)}
 .theirs{align-self:flex-start;border:2px solid var(--c);font-size:1.2em}
-.talk{border:0;border-radius:999px;padding:14px;font:600 17px var(--display);color:#fff;background:var(--c);cursor:pointer;user-select:none;touch-action:none}
+.talk{-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border:0;border-radius:999px;padding:14px;font:600 17px var(--display);color:#fff;background:var(--c);cursor:pointer;user-select:none;touch-action:none}
 .talk.on{animation:pulse 1s infinite}
 .talk:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
 @keyframes pulse{50%{opacity:.6}}
@@ -35,7 +37,7 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 </head>
 <body>
 <section class="side top" id="B" style="--c:var(--b)"></section>
-<div class="hint" id="hint">按住按鈕說話，放開後自動翻譯並朗讀給對方聽</div>
+<div class="hint" id="hint">點一下按鈕開始說話，說完再點一下送出翻譯</div>
 <section class="side" id="A" style="--c:var(--a)"></section>
 
 <script>
@@ -47,7 +49,7 @@ function build(id,def,label){
   const el=document.getElementById(id);
   el.innerHTML=`<div class="bar"><strong>${label}</strong><select id="lang${id}" aria-label="語言">${LANGS.map(([c,n])=>`<option value="${c}"${c===def?" selected":""}>${n}</option>`).join("")}</select></div>
   <div class="log" id="log${id}"></div><div class="live" id="live${id}"></div>
-  <button class="talk" id="btn${id}">按住說話</button>`;
+  <button class="talk" id="btn${id}">點我說話</button>`;
   sides[id]={lang:()=>document.getElementById("lang"+id).value,log:document.getElementById("log"+id),live:document.getElementById("live"+id),btn:document.getElementById("btn"+id)};
 }
 build("A","zh-TW","我");
@@ -91,12 +93,12 @@ function start(id){
     sides[id].live.textContent=finalText+interim;};
   rec.onerror=e=>{sides[id].live.textContent="辨識錯誤："+e.error};
   rec.onend=()=>finish(id);
-  rec.start();sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…放開送出";
+  rec.start();sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…點一下送出";
 }
 function stop(){if(rec)rec.stop()}
 async function finish(id){
   const text=(finalText||sides[id].live.textContent).trim();
-  rec=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="按住說話";sides[id].live.textContent="";
+  rec=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話";sides[id].live.textContent="";
   if(!text||text.startsWith("辨識錯誤"))return;
   const o=other(id),from=sides[id].lang(),to=sides[o].lang();
   try{
@@ -106,10 +108,8 @@ async function finish(id){
 }
 for(const id of ["A","B"]){
   const b=sides[id].btn;
-  b.addEventListener("pointerdown",e=>{e.preventDefault();start(id)});
-  ["pointerup","pointerleave","pointercancel"].forEach(ev=>b.addEventListener(ev,stop));
-  b.addEventListener("keydown",e=>{if((e.key===" "||e.key==="Enter")&&!e.repeat){e.preventDefault();start(id)}});
-  b.addEventListener("keyup",e=>{if(e.key===" "||e.key==="Enter")stop()});
+  b.addEventListener("click",()=>{rec?(active===id&&stop()):start(id)});
+  b.addEventListener("contextmenu",e=>e.preventDefault());
 }
 speechSynthesis.getVoices();
 </script>
