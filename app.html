@@ -81,34 +81,41 @@ function speak(text,lang){
   if(v)u.voice=v;speechSynthesis.speak(u);
 }
 
-let rec=null,active=null,finalText="";
+let rec=null,active=null,finalText="",lastErr="",gen=0;
+const hint=document.getElementById("hint");
+function status(id,msg){sides[id].live.textContent=msg;hint.textContent=msg}
+function reset(id){rec=null;active=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話"}
 function start(id){
-  if(!SR){document.getElementById("hint").textContent="這個瀏覽器不支援語音辨識，請用 Chrome 開啟。";return}
-  if(rec)return;
+  if(!SR){hint.textContent="這個瀏覽器不支援語音辨識，請用 Safari 或 Chrome 開啟。";return}
+  if(rec){try{rec.abort()}catch(e){}reset(active)}
   speechSynthesis.cancel();
-  active=id;finalText="";
-  rec=new SR();rec.lang=sides[id].lang();rec.interimResults=true;rec.continuous=true;
-  rec.onresult=e=>{let interim="";finalText="";
-    for(const r of e.results){r.isFinal?finalText+=r[0].transcript:interim+=r[0].transcript}
+  const my=++gen;active=id;finalText="";lastErr="";
+  const r=new SR();rec=r;
+  r.lang=sides[id].lang();r.interimResults=true;r.continuous=true;
+  r.onstart=()=>{if(my===gen)status(id,"聆聽中（"+r.lang+"）…")};
+  r.onresult=e=>{if(my!==gen)return;let interim="";finalText="";
+    for(const x of e.results){x.isFinal?finalText+=x[0].transcript:interim+=x[0].transcript}
     sides[id].live.textContent=finalText+interim;};
-  rec.onerror=e=>{sides[id].live.textContent="辨識錯誤："+e.error};
-  rec.onend=()=>finish(id);
-  rec.start();sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…點一下送出";
+  r.onerror=e=>{if(my===gen)lastErr=e.error};
+  r.onend=()=>{if(my===gen)finish(id)};
+  sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…點一下送出";
+  try{r.start()}catch(e){lastErr=e.message||String(e);finish(id)}
 }
-function stop(){if(rec)rec.stop()}
+function stop(){if(rec){try{rec.stop()}catch(e){finish(active)}}}
 async function finish(id){
-  const text=(finalText||sides[id].live.textContent).trim();
-  rec=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話";sides[id].live.textContent="";
-  if(!text||text.startsWith("辨識錯誤"))return;
+  const text=(finalText||sides[id].live.textContent.replace(/^聆聽中.*$/,"")).trim();
+  reset(id);sides[id].live.textContent="";
+  if(!text){hint.textContent=lastErr?"沒有收到聲音（"+lastErr+"），請再點一次試試":"沒有聽到內容，請再點一次說話";return}
+  hint.textContent="翻譯中…";
   const o=other(id),from=sides[id].lang(),to=sides[o].lang();
   try{
     const t=await translate(text,from,to);
-    add(id,"mine",text,t);add(o,"theirs",t,text);speak(t,to);
-  }catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線")}
+    add(id,"mine",text,t);add(o,"theirs",t,text);speak(t,to);hint.textContent="點一下按鈕開始說話，說完再點一下送出翻譯";
+  }catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線");hint.textContent="翻譯失敗"}
 }
 for(const id of ["A","B"]){
   const b=sides[id].btn;
-  b.addEventListener("click",()=>{rec?(active===id&&stop()):start(id)});
+  b.addEventListener("click",()=>{rec&&active===id?stop():start(id)});
   b.addEventListener("contextmenu",e=>e.preventDefault());
 }
 speechSynthesis.getVoices();
