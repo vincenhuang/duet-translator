@@ -37,7 +37,7 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 </head>
 <body>
 <section class="side top" id="B" style="--c:var(--b)"></section>
-<label class="hint"><input type="checkbox" id="tts" checked> 朗讀翻譯</label>
+<label class="hint"><input type="checkbox" id="tts" checked> 我說的話自動唸給對方聽</label>
 <div class="hint" id="hint">準備辨識模型中…</div>
 <section class="side" id="A" style="--c:var(--a)"></section>
 
@@ -137,7 +137,7 @@ async function finish(id,blob){
     if(from==="zh-TW")text=await translate(text,"zh-CN","zh-TW").catch(()=>text); // Whisper 常輸出簡體，轉成繁體
     let t;
     try{t=await translate(text,from,to)}catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線");hint.textContent="翻譯失敗";return}
-    add(id,"mine",text,t);add(o,"theirs",t,text);speak(t,to);hint.textContent=IDLE;
+    add(id,"mine",text,t);add(o,"theirs",t,text);if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽hint.textContent=IDLE;
   }catch(e){
     hint.textContent=(e.message==="short"||e.message==="empty")?"沒有聽到內容，請再點一次說話":"辨識失敗："+(e.message||e);
   }finally{busy=false;setBtn(id,false,"點我說話")}
