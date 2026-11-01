@@ -35,12 +35,15 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 @keyframes pulse{50%{opacity:.6}}
 @media (prefers-reduced-motion:reduce){.talk.on{animation:none;outline:3px dashed var(--fg)}}
 .live{color:var(--muted);font-size:14px;min-height:1.2em}
+.opts{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;align-items:center}
+.opts select{padding:2px 6px;font-size:12px}
 .hint{color:var(--muted);font-size:12px;text-align:center}
 </style>
 </head>
 <body>
 <section class="side top" id="B" style="--c:var(--b)"></section>
-<label class="hint"><input type="checkbox" id="tts" checked> 我說的話自動唸給對方聽</label>
+<div class="hint opts"><label><input type="checkbox" id="tts" checked> 我說的話自動唸給對方聽</label>
+<label>辨識 <select id="model" aria-label="辨識準確度"><option value="base">標準（76MB，較快）</option><option value="small">精準（250MB，較慢）</option></select></label></div>
 <div class="hint" id="hint">準備辨識模型中…</div>
 <section class="side" id="A" style="--c:var(--a)"></section>
 
@@ -103,10 +106,19 @@ function speak(text,lang,force){
 }
 
 // 語音辨識：手機本機跑 Whisper，不靠瀏覽器內建辨識（iOS 那個換語言、朗讀後就收不到音）
-let asr=null,asrErr=null;
-const asrReady=pipeline("automatic-speech-recognition","onnx-community/whisper-base",{dtype:"q8",device:"wasm",
-  progress_callback:p=>{if(p.status==="progress"&&p.file.endsWith(".onnx"))hint.textContent=`第一次使用，下載辨識模型中… ${Math.round(p.progress)}%`}
-}).then(p=>{asr=p;hint.textContent=IDLE}).catch(e=>{asrErr=e;hint.textContent="辨識模型載入失敗，請重新整理（"+(e.message||e)+"）"});
+let asr=null,asrErr=null,loading=null;
+const MODELS={base:"onnx-community/whisper-base",small:"onnx-community/whisper-small"};
+const mSel=document.getElementById("model");
+try{const m=localStorage.getItem("duet-model");if(m&&MODELS[m])mSel.value=m}catch(e){}
+function loadModel(){
+  const key=mSel.value;asr=null;asrErr=null;
+  const my=loading=pipeline("automatic-speech-recognition",MODELS[key],{dtype:"q8",device:"wasm",
+    progress_callback:p=>{if(loading===my&&p.status==="progress"&&p.file.endsWith(".onnx"))hint.textContent=`下載辨識模型中（${key==="small"?"精準":"標準"}）… ${Math.round(p.progress)}%`}
+  });
+  my.then(p=>{if(loading===my){asr=p;hint.textContent=IDLE}}).catch(e=>{if(loading===my){asrErr=e;hint.textContent="辨識模型載入失敗，請重新整理（"+(e.message||e)+"）"}});
+}
+mSel.addEventListener("change",()=>{try{localStorage.setItem("duet-model",mSel.value)}catch(e){}loadModel()});
+loadModel();
 
 async function toMono16k(blob){
   const buf=await blob.arrayBuffer();
