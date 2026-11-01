@@ -67,25 +67,40 @@ build("B","en-US","對方");
 const other=id=>id==="A"?"B":"A";
 
 const SPK='<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>';
-function add(id,cls,text,sub,lang){
-  const d=document.createElement("div");d.className="msg "+cls;
+function add(id,cls,text,sub,lang,el){
+  const d=el||document.createElement("div");d.className="msg "+cls;d.innerHTML="";
   const p=document.createElement("span");p.textContent=text;d.append(p);
   if(lang){const b=document.createElement("button");b.className="replay";b.innerHTML=SPK;b.setAttribute("aria-label","重新播放");
     b.addEventListener("click",()=>{unlockTTS();speak(text,lang,true)});d.prepend(b)}if(sub){const s=document.createElement("small");s.textContent=sub;d.append(s)}
-  sides[id].log.append(d);sides[id].log.scrollTop=1e9;
+  if(!el){sides[id].log.append(d);sides[id].log.scrollTop=1e9}
+  return d;
 }
 
+// 對話紀錄：每句存各語言版本，翻譯時帶前兩句同語言的上下文
+const history=[];
+async function translateCtx(text,from,to){
+  const ctx=history.slice(-2).map(h=>h[from]).filter(Boolean).map(x=>x.replace(/\n/g," "));
+  if(ctx.length&&from.split("-")[0]!==to.split("-")[0]){
+    try{
+      const out=(await translate([...ctx,text].join("\n"),from,to)).split("\n").map(x=>x.trim()).filter(Boolean);
+      if(out.length===ctx.length+1)return out[out.length-1];
+    }catch(e){}
+  }
+  return translate(text,from,to);
+}
 async function translate(text,from,to){
   const f=from.split("-")[0],t=to.split("-")[0];
   const g=c=>c==="zh"?"zh-TW":c;
   if(f===t&&f!=="zh")return text;
-  try{
-    const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${f==="zh"?"auto":g(f)}&tl=${g(t)}&dt=t&q=${encodeURIComponent(text)}`);
-    const j=await r.json();return j[0].map(x=>x[0]).join("");
-  }catch(e){
-    const r=await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`);
-    return (await r.json()).responseData.translatedText;
-  }
+  const sl=f==="zh"?"auto":g(f),tl=g(t),q=encodeURIComponent(text);
+  // 兩個 Google 端點輪流試、各重試一次；都失敗才用品質較差的 MyMemory
+  const tries=[
+    async()=>{const j=await (await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${q}`)).json();return j[0].map(x=>x[0]).join("")},
+    async()=>{const j=await (await fetch(`https://clients5.google.com/translate_a/t?client=dict-chrome-ex&sl=${sl}&tl=${tl}&q=${q}`)).json();const x=Array.isArray(j[0])?j[0][0]:j[0];if(typeof x!=="string")throw 0;return x}
+  ];
+  for(let round=0;round<2;round++)for(const fn of tries){try{const r=await fn();if(r)return r}catch(e){}}
+  const r=await fetch(`https://api.mymemory.translated.net/get?q=${q}&langpair=${from}|${to}`);
+  return (await r.json()).responseData.translatedText;
 }
 
 // iOS 只允許在點擊當下啟用朗讀；辨識要等好幾秒，所以在點按鈕時先唸一段靜音把朗讀解鎖
@@ -101,7 +116,10 @@ function speak(text,lang,force){
   if(speechSynthesis.paused)speechSynthesis.resume();
   const u=new SpeechSynthesisUtterance(text);u.lang=lang;
   const v=speechSynthesis.getVoices().find(v=>v.lang.replace("_","-").startsWith(lang.split("-")[0]));
-  if(v)u.voice=v;u.rate=0.95;speechSynthesis.speak(u);
+  if(v)u.voice=v;u.rate=0.95;
+  let started=false;u.onstart=()=>{started=true};
+  speechSynthesis.speak(u);
+  setTimeout(()=>{if(!started&&!speechSynthesis.speaking)hint.textContent="沒有自動唸出來，請點翻譯旁的喇叭播放（也請確認沒開靜音）"},2500);
   }catch(e){hint.textContent="無法朗讀："+(e.message||e)}
 }
 
@@ -148,6 +166,19 @@ function stop(){
   if(recorder&&recorder.state==="recording")recorder.stop();
   if(stream)stream.getTracks().forEach(t=>t.stop());
 }
+async function sendText(id,text,replace){
+  hint.textContent="翻譯中…";
+  const o=other(id),from=sides[id].lang(),to=sides[o].lang();
+  let t;
+  try{t=await translateCtx(text,from,to)}catch(e){hint.textContent="翻譯失敗，請檢查網路連線後再試";return}
+  const h={[from]:text,[to]:t};
+  if(replace){Object.assign(replace.h,h);for(const k in replace.h)if(k!==from&&k!==to)delete replace.h[k]}else history.push(h);
+  const mine=add(id,"mine",text,t,null,replace&&replace.mine);
+  const theirs=add(o,"theirs",t,text,to,replace&&replace.theirs);
+  const pair={h:replace?replace.h:h,mine,theirs};
+  hint.textContent=IDLE;
+  if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽
+}
 async function finish(id,blob){
   recorder=null;stream=null;active=null;busy=true;
   setBtn(id,false,"辨識中…");hint.textContent="辨識中…";
@@ -158,12 +189,8 @@ async function finish(id,blob){
     const out=await asr(audio,{language:lang,task:"transcribe",chunk_length_s:30});
     let text=(out.text||"").trim();
     if(!text)throw new Error("empty");
-    hint.textContent="翻譯中…";
-    const o=other(id),from=sides[id].lang(),to=sides[o].lang();
-    if(from==="zh-TW")text=await translate(text,"zh-CN","zh-TW").catch(()=>text); // Whisper 常輸出簡體，轉成繁體
-    let t;
-    try{t=await translate(text,from,to)}catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線");hint.textContent="翻譯失敗";return}
-    add(id,"mine",text,t);add(o,"theirs",t,text,to);hint.textContent=IDLE;if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽
+    if(sides[id].lang()==="zh-TW")text=await translate(text,"zh-CN","zh-TW").catch(()=>text); // Whisper 常輸出簡體，轉成繁體
+    await sendText(id,text);
   }catch(e){
     hint.textContent=(e.message==="short"||e.message==="empty")?"沒有聽到內容，請再點一次說話":"辨識失敗："+(e.message||e);
   }finally{busy=false;setBtn(id,false,"點我說話")}
