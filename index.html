@@ -83,7 +83,7 @@ function speak(text,lang){
   if(v)u.voice=v;speechSynthesis.speak(u);
 }
 
-let spokeOnce=false,rec=null,active=null,finalText="",lastErr="",gen=0;
+let REC=null,spokeOnce=false,rec=null,active=null,finalText="",lastErr="",gen=0;
 const hint=document.getElementById("hint");
 function status(id,msg){sides[id].live.textContent=msg;hint.textContent=msg}
 function reset(id){rec=null;active=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話"}
@@ -93,14 +93,15 @@ async function wakeMic(){
 }
 async function start(id){
   if(!SR){hint.textContent="這個瀏覽器不支援語音辨識，請用 Safari 或 Chrome 開啟。";return}
-  if(rec){try{rec.abort()}catch(e){}reset(active)}
+  if(rec){gen++;try{rec.abort()}catch(e){}reset(active);await new Promise(r=>setTimeout(r,250))}
   const spoke=speechSynthesis.speaking||spokeOnce;
   speechSynthesis.cancel();
   const my=++gen;
   sides[id].btn.classList.add("on");sides[id].btn.textContent="準備中…";
   if(spoke){await wakeMic();await new Promise(r=>setTimeout(r,300));spokeOnce=false}
   if(my!==gen)return;active=id;finalText="";lastErr="";
-  const r=new SR();rec=r;
+  // iOS: 同一頁重複 new SpeechRecognition 第二次起常收不到音，整頁共用一個
+  const r=REC||(REC=new SR());rec=r;
   r.lang=sides[id].lang();r.interimResults=true;r.continuous=true;
   r.onstart=()=>{if(my===gen)status(id,"聆聽中（"+r.lang+"）…")};
   r.onresult=e=>{if(my!==gen)return;let interim="";finalText="";
