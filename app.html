@@ -24,6 +24,9 @@ select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--lin
 .log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-height:0}
 .msg{max-width:85%;padding:8px 12px;border-radius:12px;line-height:1.45}
 .msg small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.replay{float:right;margin:-2px -4px 0 10px;border:0;background:transparent;color:var(--c);padding:6px;border-radius:8px;cursor:pointer;line-height:0}
+.replay:active{background:var(--bg)}
+.replay:focus-visible{outline:2px solid var(--c)}
 .mine{align-self:flex-end;background:var(--bg)}
 .theirs{align-self:flex-start;border:2px solid var(--c);font-size:1.2em}
 .talk{-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border:0;border-radius:999px;padding:14px;font:600 17px var(--display);color:#fff;background:var(--c);cursor:pointer;user-select:none;touch-action:none}
@@ -60,9 +63,12 @@ build("A","zh-TW","我");
 build("B","en-US","對方");
 const other=id=>id==="A"?"B":"A";
 
-function add(id,cls,text,sub){
+const SPK='<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M4 9v6h4l5 4V5L8 9H4zm12.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>';
+function add(id,cls,text,sub,lang){
   const d=document.createElement("div");d.className="msg "+cls;
-  d.textContent=text;if(sub){const s=document.createElement("small");s.textContent=sub;d.append(s)}
+  const p=document.createElement("span");p.textContent=text;d.append(p);
+  if(lang){const b=document.createElement("button");b.className="replay";b.innerHTML=SPK;b.setAttribute("aria-label","重新播放");
+    b.addEventListener("click",()=>{unlockTTS();speak(text,lang,true)});d.prepend(b)}if(sub){const s=document.createElement("small");s.textContent=sub;d.append(s)}
   sides[id].log.append(d);sides[id].log.scrollTop=1e9;
 }
 
@@ -85,8 +91,9 @@ function unlockTTS(){
   if(ttsUnlocked)return;ttsUnlocked=true;
   try{const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u)}catch(e){}
 }
-function speak(text,lang){
-  if(!document.getElementById("tts").checked)return;
+function speak(text,lang,force){
+  if(!force&&!document.getElementById("tts").checked)return;
+  if(force)speechSynthesis.cancel();
   try{
   if(speechSynthesis.paused)speechSynthesis.resume();
   const u=new SpeechSynthesisUtterance(text);u.lang=lang;
@@ -144,7 +151,7 @@ async function finish(id,blob){
     if(from==="zh-TW")text=await translate(text,"zh-CN","zh-TW").catch(()=>text); // Whisper 常輸出簡體，轉成繁體
     let t;
     try{t=await translate(text,from,to)}catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線");hint.textContent="翻譯失敗";return}
-    add(id,"mine",text,t);add(o,"theirs",t,text);hint.textContent=IDLE;if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽
+    add(id,"mine",text,t);add(o,"theirs",t,text,to);hint.textContent=IDLE;if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽
   }catch(e){
     hint.textContent=(e.message==="short"||e.message==="empty")?"沒有聽到內容，請再點一次說話":"辨識失敗："+(e.message||e);
   }finally{busy=false;setBtn(id,false,"點我說話")}
