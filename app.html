@@ -79,12 +79,20 @@ async function translate(text,from,to){
   }
 }
 
+// iOS 只允許在點擊當下啟用朗讀；辨識要等好幾秒，所以在點按鈕時先唸一段靜音把朗讀解鎖
+let ttsUnlocked=false;
+function unlockTTS(){
+  if(ttsUnlocked)return;ttsUnlocked=true;
+  try{const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u)}catch(e){}
+}
 function speak(text,lang){
   if(!document.getElementById("tts").checked)return;
-  speechSynthesis.cancel();
+  try{
+  if(speechSynthesis.paused)speechSynthesis.resume();
   const u=new SpeechSynthesisUtterance(text);u.lang=lang;
   const v=speechSynthesis.getVoices().find(v=>v.lang.replace("_","-").startsWith(lang.split("-")[0]));
-  if(v)u.voice=v;speechSynthesis.speak(u);
+  if(v)u.voice=v;u.rate=0.95;speechSynthesis.speak(u);
+  }catch(e){hint.textContent="無法朗讀："+(e.message||e)}
 }
 
 // 語音辨識：手機本機跑 Whisper，不靠瀏覽器內建辨識（iOS 那個換語言、朗讀後就收不到音）
@@ -108,7 +116,6 @@ function setBtn(id,on,text){sides[id].btn.classList.toggle("on",on);sides[id].bt
 async function start(id){
   if(busy)return;
   if(!asr){hint.textContent=asrErr?"辨識模型載入失敗，請重新整理":"辨識模型還在下載，請稍等…";return}
-  speechSynthesis.cancel();
   try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
   catch(e){hint.textContent="無法使用麥克風，請到瀏覽器設定允許麥克風";return}
   chunks=[];active=id;
@@ -137,14 +144,14 @@ async function finish(id,blob){
     if(from==="zh-TW")text=await translate(text,"zh-CN","zh-TW").catch(()=>text); // Whisper 常輸出簡體，轉成繁體
     let t;
     try{t=await translate(text,from,to)}catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線");hint.textContent="翻譯失敗";return}
-    add(id,"mine",text,t);add(o,"theirs",t,text);if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽hint.textContent=IDLE;
+    add(id,"mine",text,t);add(o,"theirs",t,text);hint.textContent=IDLE;if(id==="A")speak(t,to); // 只有我這邊送出才唸給對方聽
   }catch(e){
     hint.textContent=(e.message==="short"||e.message==="empty")?"沒有聽到內容，請再點一次說話":"辨識失敗："+(e.message||e);
   }finally{busy=false;setBtn(id,false,"點我說話")}
 }
 for(const id of ["A","B"]){
   const b=sides[id].btn;
-  b.addEventListener("click",()=>{active===id?stop():(active?null:start(id))});
+  b.addEventListener("click",()=>{if(ttsUnlocked&&speechSynthesis.speaking)speechSynthesis.cancel();unlockTTS();active===id?stop():(active?null:start(id))});
   b.addEventListener("contextmenu",e=>e.preventDefault());
 }
 speechSynthesis.getVoices();
