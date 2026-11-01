@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>對面說 Duet</title>
+<style>
+/* Layout: 兩人面對面，上半部旋轉 180°，各自一個說話鍵 */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --fg:#17202a; --muted:#6a7684;
+  --a:#1f6feb; --b:#c2410c; --line:#d6dce3;
+  --display:"Noto Sans TC",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1418;--panel:#182028;--fg:#e8edf2;--muted:#8d99a6;--a:#5a9bff;--b:#f08a4b;--line:#2a3540;color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.msg{-webkit-user-select:text;user-select:text}
+body{background:var(--bg);color:var(--fg);font-family:var(--display);display:flex;flex-direction:column;gap:8px;padding:8px 16px}
+.side{flex:1;min-height:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;padding:12px;gap:10px}
+.side.top{transform:rotate(180deg)}
+.bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+select{font:inherit;padding:6px 8px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--fg)}
+.log{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-height:0}
+.msg{max-width:85%;padding:8px 12px;border-radius:12px;line-height:1.45}
+.msg small{display:block;color:var(--muted);font-size:12px;margin-top:2px}
+.mine{align-self:flex-end;background:var(--bg)}
+.theirs{align-self:flex-start;border:2px solid var(--c);font-size:1.2em}
+.talk{-webkit-user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;border:0;border-radius:999px;padding:14px;font:600 17px var(--display);color:#fff;background:var(--c);cursor:pointer;user-select:none;touch-action:none}
+.talk.on{animation:pulse 1s infinite}
+.talk:focus-visible{outline:3px solid var(--fg);outline-offset:2px}
+@keyframes pulse{50%{opacity:.6}}
+@media (prefers-reduced-motion:reduce){.talk.on{animation:none;outline:3px dashed var(--fg)}}
+.live{color:var(--muted);font-size:14px;min-height:1.2em}
+.hint{color:var(--muted);font-size:12px;text-align:center}
+</style>
+</head>
+<body>
+<section class="side top" id="B" style="--c:var(--b)"></section>
+<div class="hint" id="hint">點一下按鈕開始說話，說完再點一下送出翻譯</div>
+<section class="side" id="A" style="--c:var(--a)"></section>
+
+<script>
+const LANGS=[["zh-TW","中文"],["en-US","English"],["ja-JP","日本語"],["ko-KR","한국어"],["fr-FR","Français"],["de-DE","Deutsch"],["es-ES","Español"],["th-TH","ไทย"],["vi-VN","Tiếng Việt"]];
+const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+const sides={};
+
+function build(id,def,label){
+  const el=document.getElementById(id);
+  el.innerHTML=`<div class="bar"><strong>${label}</strong><select id="lang${id}" aria-label="語言">${LANGS.map(([c,n])=>`<option value="${c}"${c===def?" selected":""}>${n}</option>`).join("")}</select></div>
+  <div class="log" id="log${id}"></div><div class="live" id="live${id}"></div>
+  <button class="talk" id="btn${id}">點我說話</button>`;
+  sides[id]={lang:()=>document.getElementById("lang"+id).value,log:document.getElementById("log"+id),live:document.getElementById("live"+id),btn:document.getElementById("btn"+id)};
+}
+build("A","zh-TW","我");
+build("B","en-US","對方");
+const other=id=>id==="A"?"B":"A";
+
+function add(id,cls,text,sub){
+  const d=document.createElement("div");d.className="msg "+cls;
+  d.textContent=text;if(sub){const s=document.createElement("small");s.textContent=sub;d.append(s)}
+  sides[id].log.append(d);sides[id].log.scrollTop=1e9;
+}
+
+async function translate(text,from,to){
+  const f=from.split("-")[0],t=to.split("-")[0];
+  if(f===t)return text;
+  try{
+    const r=await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${f==="zh"?"zh-TW":f}&tl=${t==="zh"?"zh-TW":t}&dt=t&q=${encodeURIComponent(text)}`);
+    const j=await r.json();return j[0].map(x=>x[0]).join("");
+  }catch(e){
+    const r=await fetch(`https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`);
+    return (await r.json()).responseData.translatedText;
+  }
+}
+
+function speak(text,lang){
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(text);u.lang=lang;
+  const v=speechSynthesis.getVoices().find(v=>v.lang.replace("_","-").startsWith(lang.split("-")[0]));
+  if(v)u.voice=v;speechSynthesis.speak(u);
+}
+
+let rec=null,active=null,finalText="";
+function start(id){
+  if(!SR){document.getElementById("hint").textContent="這個瀏覽器不支援語音辨識，請用 Chrome 開啟。";return}
+  if(rec)return;
+  speechSynthesis.cancel();
+  active=id;finalText="";
+  rec=new SR();rec.lang=sides[id].lang();rec.interimResults=true;rec.continuous=true;
+  rec.onresult=e=>{let interim="";finalText="";
+    for(const r of e.results){r.isFinal?finalText+=r[0].transcript:interim+=r[0].transcript}
+    sides[id].live.textContent=finalText+interim;};
+  rec.onerror=e=>{sides[id].live.textContent="辨識錯誤："+e.error};
+  rec.onend=()=>finish(id);
+  rec.start();sides[id].btn.classList.add("on");sides[id].btn.textContent="聆聽中…點一下送出";
+}
+function stop(){if(rec)rec.stop()}
+async function finish(id){
+  const text=(finalText||sides[id].live.textContent).trim();
+  rec=null;sides[id].btn.classList.remove("on");sides[id].btn.textContent="點我說話";sides[id].live.textContent="";
+  if(!text||text.startsWith("辨識錯誤"))return;
+  const o=other(id),from=sides[id].lang(),to=sides[o].lang();
+  try{
+    const t=await translate(text,from,to);
+    add(id,"mine",text,t);add(o,"theirs",t,text);speak(t,to);
+  }catch(e){add(id,"mine",text,"翻譯失敗，請檢查網路連線")}
+}
+for(const id of ["A","B"]){
+  const b=sides[id].btn;
+  b.addEventListener("click",()=>{rec?(active===id&&stop()):start(id)});
+  b.addEventListener("contextmenu",e=>e.preventDefault());
+}
+speechSynthesis.getVoices();
+</script>
+</body>
+</html>
